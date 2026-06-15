@@ -1,0 +1,24 @@
+# Pinned to a known-good, mutually-compatible set.
+# The diffusers/transformers/huggingface_hub trio MUST stay aligned —
+# newer mismatched versions caused "cannot import AutoImageProcessor" /
+# "Dinov2WithRegistersConfig" import errors.
+
+# Core diffusion stack
+diffusers==0.31.0
+transformers==4.46.3
+huggingface_hub==0.36.2
+
+# PyTorch — install the CUDA build separately so you get GPU support:
+#   pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+# (plain `pip install torch` gives CPU-only)
+torch==2.6.0
+torchvision==0.21.0
+
+# Web UI (server.py + web/index.html)
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.0
+
+# Utilities
+accelerate>=0.30
+pillow>=10.0

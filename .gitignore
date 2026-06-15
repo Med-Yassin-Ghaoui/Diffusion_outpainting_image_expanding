@@ -1,0 +1,29 @@
+# Model weights — upload to HuggingFace, not GitHub
+checkpoints/
+*.safetensors
+*.bin
+*.ckpt
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+*.env
+
+# Large outputs
+*.mp4
+*.webm

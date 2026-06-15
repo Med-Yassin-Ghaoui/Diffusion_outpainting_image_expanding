@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Image Field-of-View Expander</title>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --panel: #161a23;
+    --panel-2: #1d222e;
+    --line: #2a3140;
+    --text: #e6e9ef;
+    --muted: #8b94a7;
+    --accent: #4c8dff;
+    --accent-2: #6ea8ff;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(1200px 600px at 70% -10%, #1a2030 0%, var(--bg) 60%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 28px 32px 8px;
+  }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  .wrap {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 24px;
+    padding: 20px 32px 40px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+  @media (max-width: 880px){ .wrap{ grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .panel h2 {
+    margin: 0 0 14px; font-size: 13px; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); font-weight: 600;
+  }
+
+  .drop {
+    border: 1.5px dashed var(--line);
+    border-radius: 12px; padding: 22px; text-align: center;
+    color: var(--muted); cursor: pointer; transition: .15s;
+    font-size: 14px;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); color: var(--text); background: var(--panel-2); }
+  .drop input { display: none; }
+
+  .ctrl { margin: 16px 0; }
+  .ctrl label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 7px; color: var(--text); }
+  .ctrl label .val { color: var(--accent-2); font-variant-numeric: tabular-nums; }
+  input[type=range]{
+    -webkit-appearance:none; width:100%; height:5px; border-radius:5px;
+    background: var(--panel-2); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+    background: var(--accent); cursor:pointer; border:3px solid #0d0f14;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .row { display:flex; gap:10px; }
+  .row .ctrl { flex:1; }
+
+  select, input[type=text] {
+    width:100%; padding:9px 11px; border-radius:9px; border:1px solid var(--line);
+    background: var(--panel-2); color: var(--text); font-size:13px;
+  }
+
+  button.primary {
+    width:100%; padding:12px; border:none; border-radius:11px; cursor:pointer;
+    background: linear-gradient(180deg, var(--accent-2), var(--accent));
+    color:#fff; font-size:14px; font-weight:600; margin-top:6px;
+    transition:.15s; box-shadow: 0 6px 18px rgba(76,141,255,.25);
+  }
+  button.primary:hover{ filter:brightness(1.06); }
+  button.primary:disabled{ opacity:.5; cursor:not-allowed; box-shadow:none; }
+  button.ghost{
+    width:100%; padding:10px; border:1px solid var(--line); border-radius:10px;
+    background:transparent; color:var(--text); cursor:pointer; font-size:13px; margin-top:8px;
+  }
+  button.ghost:hover{ background: var(--panel-2); }
+
+  .stage {
+    position:relative; background:
+      linear-gradient(45deg,#12151d 25%,transparent 25%,transparent 75%,#12151d 75%),
+      linear-gradient(45deg,#12151d 25%,#171b24 25%,#171b24 75%,#12151d 75%);
+    background-size:24px 24px; background-position:0 0,12px 12px;
+    border:1px solid var(--line); border-radius:var(--radius);
+    display:flex; align-items:center; justify-content:center;
+    min-height:420px; overflow:hidden; padding:18px;
+  }
+  canvas { max-width:100%; max-height:60vh; border-radius:8px; display:block; }
+  .hint { color:var(--muted); font-size:14px; }
+  .meta { margin-top:10px; color:var(--muted); font-size:13px; text-align:center; font-variant-numeric:tabular-nums; }
+
+  /* live preview (left) + AI result (right), side by side on desktop */
+  .preview-row{ display:grid; grid-template-columns:1fr 1fr; gap:28px; align-items:start; }
+  .preview-row.no-result{ grid-template-columns:1fr; }  /* full-width preview before first result */
+  .result-col h2, .preview-col h2{ margin:0 0 14px; }
+  .result-box{ display:flex; align-items:center; justify-content:center;
+    background:#0e1118; border:1px solid var(--line); border-radius:var(--radius);
+    min-height:340px; padding:16px; }
+  .result-box img{ max-width:100%; max-height:62vh; border-radius:8px; display:block; }
+  @media (max-width: 1100px){
+    .preview-row{ grid-template-columns:1fr; }   /* stack on tablet/phone */
+  }
+  .badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:11px;
+    background:var(--panel-2); border:1px solid var(--line); color:var(--muted); }
+  .spinner{ width:16px;height:16px;border:2px solid rgba(255,255,255,.3);
+    border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .8s linear infinite;vertical-align:-3px;}
+  @keyframes spin{ to{ transform:rotate(360deg);} }
+
+  .progress { margin-top:12px; display:none; }
+  .progress .track {
+    height:8px; border-radius:6px; background:var(--panel-2);
+    overflow:hidden; border:1px solid var(--line);
+  }
+  .progress .fill {
+    height:100%; width:0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    border-radius:6px; transition: width .15s ease;
+  }
+  .progress .ptext { margin-top:6px; font-size:12px; color:var(--muted);
+    display:flex; justify-content:space-between; font-variant-numeric:tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🖼️ Image Field-of-View Expander</h1>
+  <p>Drag the sliders to set how far to expand each side — the preview shows a live, blurred edge-bleed of where new content will be generated.</p>
+</header>
+
+<div class="wrap">
+  <!-- LEFT: controls -->
+  <div class="panel">
+    <h2>Image</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="image/*" />
+      <span id="dropLabel">Click or drop an image here</span>
+    </label>
+
+    <h2 style="margin-top:22px">Expansion (px per side)</h2>
+    <div class="ctrl">
+      <label>↑ Top <span class="val" id="vTop">96</span></label>
+      <input type="range" id="top" min="0" max="512" step="8" value="96" />
+    </div>
+    <div class="ctrl">
+      <label>↓ Bottom <span class="val" id="vBottom">96</span></label>
+      <input type="range" id="bottom" min="0" max="512" step="8" value="96" />
+    </div>
+    <div class="row">
+      <div class="ctrl">
+        <label>← Left <span class="val" id="vLeft">160</span></label>
+        <input type="range" id="left" min="0" max="512" step="8" value="160" />
+      </div>
+      <div class="ctrl">
+        <label>Right → <span class="val" id="vRight">160</span></label>
+        <input type="range" id="right" min="0" max="512" step="8" value="160" />
+      </div>
+    </div>
+
+    <h2 style="margin-top:22px">Generation</h2>
+    <div class="ctrl">
+      <label>Max output side <span class="val" id="vMax">512</span></label>
+      <input type="range" id="maxside" min="448" max="768" step="64" value="512" />
+    </div>
+    <div class="ctrl">
+      <label>Steps <span class="val" id="vSteps">40</span></label>
+      <input type="range" id="steps" min="20" max="75" step="5" value="40" />
+    </div>
+    <div class="ctrl">
+      <label title="Show the image forming. 0 = off (fastest). Lower N = smoother but slower (extra decode each preview).">
+        Step-by-step preview <span class="val" id="vPrev">off</span>
+      </label>
+      <input type="range" id="previewEvery" min="0" max="10" step="1" value="0" />
+    </div>
+    <div class="ctrl">
+      <label>Prompt (optional)</label>
+      <input type="text" id="prompt" placeholder="e.g. a wide beach with mountains" />
+    </div>
+    <div class="ctrl">
+      <label>Guidance <span class="val" id="vGuid">1.0</span></label>
+      <input type="range" id="guidance" min="1" max="12" step="0.5" value="1" />
+    </div>
+
+    <button class="primary" id="expandBtn" disabled>✨ Expand with AI</button>
+    <div class="progress" id="progress">
+      <div class="track"><div class="fill" id="progFill"></div></div>
+      <div class="ptext"><span id="progLabel">Starting…</span><span id="progPct">0%</span></div>
+    </div>
+    <button class="ghost" id="dlGif" disabled>⬇️ Download preview animation (GIF)</button>
+  </div>
+
+  <!-- RIGHT panel: live preview (left) + AI result (right), side by side -->
+  <div class="panel preview-row no-result">
+    <!-- Live preview on the LEFT -->
+    <div class="preview-col">
+      <h2>Live preview <span class="badge">no AI · real-time</span></h2>
+      <div class="stage" id="stage">
+        <span class="hint" id="stageHint">Upload an image to see the expansion preview</span>
+        <canvas id="cv" style="display:none"></canvas>
+      </div>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <!-- AI result on the RIGHT -->
+    <div class="result-col" id="resultWrap" style="display:none">
+      <h2>AI result</h2>
+      <div class="result-box">
+        <img id="resultImg" alt="expanded result" />
+      </div>
+      <div style="margin-top:10px"><a id="dlResult" download="expanded.png"><button class="ghost">⬇️ Download result</button></a></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ----------------------------------------------------------------------------
+// State
+// ----------------------------------------------------------------------------
+let srcImg = null;          // HTMLImageElement of the uploaded picture
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let raf = null;             // requestAnimationFrame handle
+let phase = 0;              // drives the drifting animation
+
+const ids = ['top','bottom','left','right','maxside','steps','guidance'];
+const get = id => +document.getElementById(id).value;
+
+// keep the little value labels in sync + restart the preview on any change
+function bindSliders(){
+  const map = {top:'vTop',bottom:'vBottom',left:'vLeft',right:'vRight',
+               maxside:'vMax',steps:'vSteps',guidance:'vGuid'};
+  for(const [sl,lab] of Object.entries(map)){
+    const el = document.getElementById(sl);
+    el.addEventListener('input', ()=>{
+      let v = el.value;
+      if(sl==='guidance') v = (+v).toFixed(1);
+      document.getElementById(lab).textContent = v;
+      updateMeta();
+    });
+  }
+  // preview-every has a special label: 0 -> "off", else "every N"
+  const pe = document.getElementById('previewEvery');
+  pe.addEventListener('input', ()=>{
+    const n = +pe.value;
+    document.getElementById('vPrev').textContent = n === 0 ? 'off' : `every ${n}`;
+  });
+}
+
+// ----------------------------------------------------------------------------
+// File upload
+// ----------------------------------------------------------------------------
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+drop.addEventListener('dragover', e=>{e.preventDefault();drop.classList.add('over');});
+drop.addEventListener('dragleave', ()=>drop.classList.remove('over'));
+drop.addEventListener('drop', e=>{
+  e.preventDefault(); drop.classList.remove('over');
+  if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e=>{ if(e.target.files[0]) loadFile(e.target.files[0]); });
+
+let lastDataURL = null;
+function loadFile(file){
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    lastDataURL = ev.target.result;
+    const img = new Image();
+    img.onload = ()=>{
+      srcImg = img;
+      document.getElementById('dropLabel').textContent = file.name;
+      document.getElementById('stageHint').style.display='none';
+      cv.style.display='block';
+      document.getElementById('expandBtn').disabled=false;
+      document.getElementById('dlGif').disabled=false;
+      startAnim();
+      updateMeta();
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ----------------------------------------------------------------------------
+// The live, animated, blurred edge-bleed preview (Apple-style)
+//   - The expansion border is filled by STRETCHING the original's edge pixels
+//     outward, heavily blurred, and slowly drifting so it feels "alive".
+//   - The sharp original sits crisp on top.
+// ----------------------------------------------------------------------------
+function computeLayout(){
+  const L=get('left'),R=get('right'),T=get('top'),B=get('bottom');
+  const iw=srcImg.naturalWidth, ih=srcImg.naturalHeight;
+  const cw=iw+L+R, ch=ih+T+B;
+  // fit preview to a comfortable on-screen size
+  const target = 720;
+  const s = Math.min(1, target/Math.max(cw,ch));
+  return {L,R,T,B,iw,ih,cw,ch,s,
+          CW:Math.round(cw*s),CH:Math.round(ch*s),
+          IW:Math.round(iw*s),IH:Math.round(ih*s),
+          ox:Math.round(L*s),oy:Math.round(T*s)};
+}
+
+function drawFrame(){
+  if(!srcImg){return;}
+  phase += 0.012;
+  const m = computeLayout();
+  cv.width=m.CW; cv.height=m.CH;
+
+  // 1) Blurred, zoomed bleed of the ENTIRE image filling the whole canvas.
+  //    A drifting offset + scale makes it breathe like Apple's expand UI.
+  const drift = Math.sin(phase)*6;
+  const breathe = 1.08 + Math.sin(phase*0.7)*0.04;
+  ctx.clearRect(0,0,m.CW,m.CH);
+  ctx.save();
+  ctx.filter = 'blur(28px) saturate(1.15) brightness(1.02)';
+  const bw = m.CW*breathe, bh = m.CH*breathe;
+  ctx.drawImage(srcImg,
+    (m.CW-bw)/2 + drift, (m.CH-bh)/2 - drift, bw, bh);
+  ctx.restore();
+
+  // 2) Stretch each edge of the original OUTWARD into its border band, blurred,
+  //    so the bleed actually continues the photo's colors at every side.
+  ctx.save();
+  ctx.filter = 'blur(18px)';
+  const iw=m.iw, ih=m.ih, edge=Math.max(2, Math.round(8/m.s));
+  // top band: take top edge strip, stretch up
+  if(m.oy>0) ctx.drawImage(srcImg, 0,0, iw,edge,  m.ox, 0, m.IW, m.oy+2);
+  // bottom band
+  if(m.CH-m.oy-m.IH>0) ctx.drawImage(srcImg, 0,ih-edge, iw,edge, m.ox, m.oy+m.IH-2, m.IW, m.CH-m.oy-m.IH+2);
+  // left band
+  if(m.ox>0) ctx.drawImage(srcImg, 0,0, edge,ih,  0, m.oy, m.ox+2, m.IH);
+  // right band
+  if(m.CW-m.ox-m.IW>0) ctx.drawImage(srcImg, iw-edge,0, edge,ih, m.ox+m.IW-2, m.oy, m.CW-m.ox-m.IW+2, m.IH);
+  ctx.restore();
+
+  // 3) Sharp original on top.
+  ctx.drawImage(srcImg, m.ox, m.oy, m.IW, m.IH);
+
+  // 4) Subtle frame around the known region.
+  ctx.strokeStyle='rgba(76,141,255,.9)'; ctx.lineWidth=2;
+  ctx.strokeRect(m.ox+1, m.oy+1, m.IW-2, m.IH-2);
+
+  raf = requestAnimationFrame(drawFrame);
+}
+function startAnim(){ if(raf) cancelAnimationFrame(raf); drawFrame(); }
+
+function updateMeta(){
+  if(!srcImg) return;
+  const L=get('left'),R=get('right'),T=get('top'),B=get('bottom');
+  const iw=srcImg.naturalWidth, ih=srcImg.naturalHeight;
+  document.getElementById('meta').textContent =
+    `original ${iw}×${ih}  →  final ${iw+L+R}×${ih+T+B}   ·   +${L+R}px wide, +${T+B}px tall`;
+}
+
+// ----------------------------------------------------------------------------
+// Download the live preview as an animated GIF (records a couple of seconds)
+// ----------------------------------------------------------------------------
+document.getElementById('dlGif').addEventListener('click', async ()=>{
+  // Lightweight approach: capture N canvas frames into a webm via MediaRecorder,
+  // which every modern browser supports without extra libraries.
+  const stream = cv.captureStream(25);
+  const rec = new MediaRecorder(stream, {mimeType:'video/webm'});
+  const chunks=[];
+  rec.ondataavailable = e=>chunks.push(e.data);
+  rec.onstop = ()=>{
+    const blob = new Blob(chunks, {type:'video/webm'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='expansion_preview.webm'; a.click();
+  };
+  rec.start();
+  setTimeout(()=>rec.stop(), 2500);  // ~2.5s clip of the live animation
+});
+
+// ----------------------------------------------------------------------------
+// Call the backend to actually run the diffusion model
+// ----------------------------------------------------------------------------
+const progress = document.getElementById('progress');
+const progFill = document.getElementById('progFill');
+const progPct  = document.getElementById('progPct');
+const progLabel= document.getElementById('progLabel');
+
+function setProgress(pct, label){
+  progFill.style.width = pct + '%';
+  progPct.textContent = Math.round(pct) + '%';
+  if(label) progLabel.textContent = label;
+}
+
+document.getElementById('expandBtn').addEventListener('click', async ()=>{
+  if(!lastDataURL) return;
+  const btn = document.getElementById('expandBtn');
+  const orig = btn.innerHTML;
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating…';
+  progress.style.display='block';
+  setProgress(0, 'Preparing…');
+
+  try{
+    const res = await fetch('/api/expand_stream', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        image: lastDataURL,
+        left:get('left'), right:get('right'), top:get('top'), bottom:get('bottom'),
+        max_side:get('maxside'), steps:get('steps'),
+        prompt: document.getElementById('prompt').value,
+        guidance_scale: get('guidance'),
+        preview_every: get('previewEvery'),
+      })
+    });
+    if(!res.ok) throw new Error(await res.text());
+
+    // Read the Server-Sent-Events stream line by line and drive the bar.
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    let done = false;
+    while(!done){
+      const {value, done:rdDone} = await reader.read();
+      if(rdDone) break;
+      buf += dec.decode(value, {stream:true});
+      const parts = buf.split('\n\n');
+      buf = parts.pop();                 // keep the incomplete tail
+      for(const chunk of parts){
+        const line = chunk.replace(/^data:\s*/, '').trim();
+        if(!line) continue;
+        const msg = JSON.parse(line);
+        if(msg.type === 'progress'){
+          setProgress(100 * msg.step / msg.total, `Denoising step ${msg.step} / ${msg.total}`);
+        } else if(msg.type === 'preview'){
+          // step-by-step reveal: show the image forming in the result box
+          document.getElementById('resultWrap').style.display='block';
+          document.querySelector('.preview-row').classList.remove('no-result');
+          document.getElementById('resultImg').src = msg.image;
+          document.getElementById('resultImg').style.opacity = 0.65 + 0.35 * msg.step / msg.total;
+        } else if(msg.type === 'done'){
+          setProgress(100, 'Done');
+          document.getElementById('resultWrap').style.display='block';
+          document.querySelector('.preview-row').classList.remove('no-result');
+          document.getElementById('resultImg').src = msg.image;
+          document.getElementById('resultImg').style.opacity = 1;
+          document.getElementById('dlResult').href = msg.image;
+          done = true;
+        } else if(msg.type === 'error'){
+          throw new Error(msg.detail);
+        }
+      }
+    }
+  }catch(err){
+    alert('Generation failed: '+err.message);
+  }finally{
+    btn.disabled=false; btn.innerHTML=orig;
+    setTimeout(()=>{ progress.style.display='none'; setProgress(0); }, 1200);
+  }
+});
+
+bindSliders();
+</script>
+</body>
+</html>
