@@ -222,6 +222,7 @@
       <div class="result-box">
         <img id="resultImg" alt="expanded result" />
       </div>
+      <div id="benchLine" style="margin-top:8px;font-size:13px;color:var(--muted);text-align:center"></div>
       <div style="margin-top:10px"><a id="dlResult" download="expanded.png"><button class="ghost">⬇️ Download result</button></a></div>
     </div>
   </div>
@@ -406,6 +407,16 @@ document.getElementById('expandBtn').addEventListener('click', async ()=>{
   btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Generating…';
   progress.style.display='block';
   setProgress(0, 'Preparing…');
+  document.getElementById('benchLine').textContent = '';
+
+  // Live wall-clock timer — appends the elapsed seconds to the status label so you
+  // can watch it tick during generation (a quick on-screen benchmark).
+  const tStart = performance.now();
+  let stepLabel = 'Preparing…';
+  const timerId = setInterval(()=>{
+    const s = ((performance.now()-tStart)/1000).toFixed(1);
+    progLabel.textContent = `${stepLabel} · ${s}s`;
+  }, 100);
 
   try{
     const res = await fetch('/api/expand_stream', {
@@ -437,7 +448,8 @@ document.getElementById('expandBtn').addEventListener('click', async ()=>{
         if(!line) continue;
         const msg = JSON.parse(line);
         if(msg.type === 'progress'){
-          setProgress(100 * msg.step / msg.total, `Denoising step ${msg.step} / ${msg.total}`);
+          stepLabel = `Denoising step ${msg.step} / ${msg.total}`;
+          setProgress(100 * msg.step / msg.total);   // label driven by the live timer
         } else if(msg.type === 'preview'){
           // step-by-step reveal: show the image forming in the result box
           document.getElementById('resultWrap').style.display='block';
@@ -445,12 +457,17 @@ document.getElementById('expandBtn').addEventListener('click', async ()=>{
           document.getElementById('resultImg').src = msg.image;
           document.getElementById('resultImg').style.opacity = 0.65 + 0.35 * msg.step / msg.total;
         } else if(msg.type === 'done'){
+          clearInterval(timerId);
           setProgress(100, 'Done');
           document.getElementById('resultWrap').style.display='block';
           document.querySelector('.preview-row').classList.remove('no-result');
           document.getElementById('resultImg').src = msg.image;
           document.getElementById('resultImg').style.opacity = 1;
           document.getElementById('dlResult').href = msg.image;
+          if(msg.elapsed != null){
+            document.getElementById('benchLine').textContent =
+              `⏱ ${msg.elapsed}s · ${msg.per_step}s/step · ${msg.size[0]}×${msg.size[1]}`;
+          }
           done = true;
         } else if(msg.type === 'error'){
           throw new Error(msg.detail);
@@ -460,6 +477,7 @@ document.getElementById('expandBtn').addEventListener('click', async ()=>{
   }catch(err){
     alert('Generation failed: '+err.message);
   }finally{
+    clearInterval(timerId);
     btn.disabled=false; btn.innerHTML=orig;
     setTimeout(()=>{ progress.style.display='none'; setProgress(0); }, 1200);
   }

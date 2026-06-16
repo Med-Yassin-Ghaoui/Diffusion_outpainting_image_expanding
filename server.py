@@ -15,11 +15,12 @@ Model: loads checkpoints/unet_final if present, else falls back to base SD2-inpa
 import base64
 import io
 import math
+import time
 from pathlib import Path
 
 import torch
 import torchvision.transforms as TT
-from PIL import Image
+from PIL import Image, ImageFilter
 import json
 import queue
 import threading
@@ -107,6 +108,41 @@ def _latents_to_pil(vae, latents):
     return Image.fromarray((img * 255).astype("uint8"))
 
 
+def _composite_original(result, inner, off_x, off_y, expand_px, feather=24):
+    """Paste the sharp original pixels (`inner`) back over the generated canvas
+    (`result`) at (off_x, off_y), feathering the inner edge so the original blends
+    smoothly into the generated border instead of a hard cut.
+
+    The VAE encode→decode cycle subtly shifts the colors/sharpness of the known
+    region, so without this the cropped part never matches the input exactly. The
+    feather is only applied on sides that were actually expanded — a side with no
+    expansion keeps the original right up to the canvas edge (no blending needed).
+    """
+    import numpy as np
+    in_w, in_h = inner.size
+    L, R, T, B = expand_px
+    f = max(1, min(feather, in_w // 2, in_h // 2))
+
+    # Per-axis ramps: 0 at an expanded edge climbing to 1 over `f` px, else flat 1.
+    xr = np.ones(in_w, dtype=np.float32)
+    if L > 0:
+        xr = np.minimum(xr, np.clip(np.arange(in_w) / f, 0, 1))
+    if R > 0:
+        xr = np.minimum(xr, np.clip((in_w - 1 - np.arange(in_w)) / f, 0, 1))
+    yr = np.ones(in_h, dtype=np.float32)
+    if T > 0:
+        yr = np.minimum(yr, np.clip(np.arange(in_h) / f, 0, 1))
+    if B > 0:
+        yr = np.minimum(yr, np.clip((in_h - 1 - np.arange(in_h)) / f, 0, 1))
+
+    alpha_arr = (np.outer(yr, xr) * 255).astype("uint8")
+    alpha = Image.fromarray(alpha_arr, "L").filter(ImageFilter.GaussianBlur(f / 3))
+
+    out = result.convert("RGB").copy()
+    out.paste(inner, (off_x, off_y), alpha)
+    return out
+
+
 @torch.no_grad()
 def run_outpaint(image, expand, max_side, steps, prompt, guidance_scale, seed=0,
                  on_step=None, preview_every=0, on_preview=None):
@@ -173,7 +209,10 @@ def run_outpaint(image, expand, max_side, steps, prompt, guidance_scale, seed=0,
             except torch.cuda.OutOfMemoryError:
                 torch.cuda.empty_cache()  # don't kill the run for a preview frame
 
-    return _latents_to_pil(vae, latents)
+    result = _latents_to_pil(vae, latents)
+    # Paste the sharp original back over the known region with a feathered edge, so
+    # that part matches the input exactly and blends seamlessly into the new border.
+    return _composite_original(result, inner, off_x, off_y, (L, R, T, B))
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +291,7 @@ def expand_stream(req: ExpandRequest):
                 q.put({"type": "preview", "step": i, "total": total,
                        "image": _image_to_dataurl(pil_img)})
 
+            t0 = time.perf_counter()
             result = run_outpaint(
                 image,
                 expand=(req.left, req.right, req.top, req.bottom),
@@ -260,8 +300,16 @@ def expand_stream(req: ExpandRequest):
                 on_step=on_step,
                 preview_every=req.preview_every, on_preview=on_preview,
             )
+            if DEVICE == "cuda":
+                torch.cuda.synchronize()  # CUDA is async — wait for real completion
+            elapsed = time.perf_counter() - t0
+            per_step = elapsed / max(1, req.steps)
+            print(f"[bench] {result.size[0]}x{result.size[1]} · {req.steps} steps · "
+                  f"{elapsed:.2f}s total · {per_step:.3f}s/step")
             q.put({"type": "done", "image": _image_to_dataurl(result),
-                   "size": list(result.size)})
+                   "size": list(result.size),
+                   "elapsed": round(elapsed, 2),
+                   "per_step": round(per_step, 3)})
         except torch.cuda.OutOfMemoryError:
             torch.cuda.empty_cache()
             q.put({"type": "error", "detail": "GPU out of memory — lower 'Max output side' or 'Steps'."})
